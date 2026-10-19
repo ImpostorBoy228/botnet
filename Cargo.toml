@@ -9,6 +9,7 @@ axum = "0.8.9"
 integrate = "0.3.1"
 maple-rs = "0.1.2"
 reqwest = { version = "0.13.5", features = ["blocking", "json"] }
+serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.3", features = ["full"] }
 
 [[bin]]
