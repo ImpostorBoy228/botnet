@@ -1,0 +1,23 @@
+[package]
+name = "botnet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+integrate = "0.3.1"
+maple-rs = "0.1.2"
+reqwest = { version = "0.13.5", features = ["blocking", "json"] }
+tokio = { version = "1.53.3", features = ["full"] }
+
+[[bin]]
+name = "master"
+path = "src/master.rs"
+
+[[bin]]
+name = "slave"
+path = "src/slave.rs"
+
+[[bin]]
+name = "virus"
+path = "src/virus.rs"
