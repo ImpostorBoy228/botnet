@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
+/// TODO: регистрация diddy, добавление вируса
+
 #[derive(Clone, Serialize, Deserialize)]
 struct Virus {
     id: u64,
