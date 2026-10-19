@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+axum = "0.8.9"
 integrate = "0.3.1"
 maple-rs = "0.1.2"
 reqwest = { version = "0.13.5", features = ["blocking", "json"] }
