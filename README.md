@@ -42,37 +42,23 @@ curl -s -w "\nHTTP %{http_code}\n" -X POST http://localhost:6767/virus_add \
 
 ### `POST /virus_status` — отчитаться о результате
 
-Тело: `{"id": ..., "status": ..., "out": [...]}`. `out` — `Vec<u8>`, т.е. **массив чисел** (байтов), не строка.
+Тело: `{"id": ..., "status": ..., "out": "..."}`. `out` — обычная строка.
 
-* `cooked` — вирус скомпилирован, `out` = результат:
+* `cooked` — вирус исполнен, `out` = результат (`все по плану` от слейва):
 ```bash
 curl -s -X POST http://localhost:6767/virus_status \
   -H "Content-Type: application/json" \
-  -d '{"id": 1, "status": "cooked", "out": [104, 101, 108, 108, 111]}'
+  -d '{"id": 1, "status": "cooked", "out": "все по плану"}'
 ```
 Ответ: `virus 1 is cooked`
 
-* `fifty` — промежуточный статус:
+* `accepted` — клиент просит захватить вирус, `out` = его IP. Захват срабатывает только если вирус был `created` (гонку двух слейвов разруливает мастер). Пример для IP `192.168.1.13`:
 ```bash
 curl -s -X POST http://localhost:6767/virus_status \
   -H "Content-Type: application/json" \
-  -d '{"id": 1, "status": "fifty", "out": [1, 2, 3]}'
-```
-Ответ: `virus 1 is fifty`
-
-* `accepted` — клиент просит захватить вирус, `out` = его IP в UTF-8 байтах. Захват срабатывает только если вирус был `created` (гонку двух слейвов разруливает мастер). Пример для IP `192.168.1.13`:
-```bash
-curl -s -X POST http://localhost:6767/virus_status \
-  -H "Content-Type: application/json" \
-  -d '{"id": 1, "status": "accepted", "out": [49,57,50,46,49,54,56,46,49,46,49,51]}'
+  -d '{"id": 1, "status": "accepted", "out": "192.168.1.13"}'
 ```
 Ответ: `virus 1 accepted` (взял таску) или `virus 1 already taken` (кто-то успел раньше)
-
-Не считать байты IP вручную:
-```bash
-python3 -c 'import sys,json; ip=sys.argv[1]; print(json.dumps({"id":1,"status":"accepted","out":list(ip.encode())}))' 192.168.1.13 | \
-  curl -s -X POST http://localhost:6767/virus_status -H "Content-Type: application/json" -d @-
-```
 
 Любой другой статус → `virus <id>: прислал хуйню <статус>`.
 
@@ -90,6 +76,45 @@ curl -s -X POST http://localhost:6767/virus_remove \
 ```bash
 curl -s http://localhost:6767/pro
 ```
+
+### `POST /diddy_remove` — выкинуть дидди из `pro` по ip
+Тот же секрет, что и у вирусовых эндпоинтов:
+```bash
+curl -s -X POST http://localhost:6767/diddy_remove \
+  -H "Content-Type: application/json" \
+  -d '{"ip": "192.168.1.13", "secret": "gazan67"}'
+```
+Ответы: `diddy 192.168.1.13 removed from pro` / `diddy 192.168.1.13 not found in pro`.
+
+> после удаления слейв перестаёт видеть себя в `pro` и на следующем тике захватит ближайший свободный `created` как свежий бот
+
+### `POST /diddy_assign_virus` — переназначить дидди на вирус
+```bash
+curl -s -X POST http://localhost:6767/diddy_assign_virus \
+  -H "Content-Type: application/json" \
+  -d '{"ip": "192.168.1.13", "id": 2, "secret": "gazan67"}'
+```
+Ответ: `diddy 192.168.1.13 now carries virus 2`
+
+> перезапись в `pro` без проверок: слейв на следующем тике увидит новое назначение и, если статус того вируса не `cooked`, исполнят его
+
+### `POST /virus_clear` — снести всю очередь разом
+```bash
+curl -s -X POST http://localhost:6767/virus_clear \
+  -H "Content-Type: application/json" \
+  -d '{"secret": "gazan67"}'
+```
+Ответ: `que очищена, удалено вирусов: N`
+
+### `POST /diddy_clear` — уволить всех дидди из `pro` разом
+```bash
+curl -s -X POST http://localhost:6767/diddy_clear \
+  -H "Content-Type: application/json" \
+  -d '{"secret": "gazan67"}'
+```
+Ответ: `pro очищена, уволено дидди: N`
+
+> Секрет (`gazan67`) прикрывает только админские ручки: `virus_add`, `virus_remove`, `virus_clear`, `diddy_remove`, `diddy_assign_virus`, `diddy_clear`. Ручки, куда стучатся слейвы (`/poll`, `/pro`, `/virus_status`), открыты.
 
 ## Slave
 

