@@ -19,13 +19,10 @@ jobs:
       - name: build master (linux)
         run: cargo build --release --bin master
 
-      - name: pack master
-        run: zip -j botnet-master-linux-x86_64.zip target/release/master
-
       - uses: actions/upload-artifact@v4
         with:
           name: master-linux
-          path: botnet-master-linux-x86_64.zip
+          path: target/release/master
 
   build-windows:
     runs-on: windows-latest
@@ -37,16 +34,12 @@ jobs:
       - name: build slave + virus (windows)
         run: cargo build --release
 
-      - name: pack slave and virus
-        shell: pwsh
-        run: |
-          Compress-Archive -Path target/release/slave.exe -DestinationPath botnet-slave-windows-x86_64.zip
-          Compress-Archive -Path target/release/virus.exe -Update -DestinationPath botnet-slave-windows-x86_64.zip
-
       - uses: actions/upload-artifact@v4
         with:
           name: slave-windows
-          path: botnet-slave-windows-x86_64.zip
+          path: |
+            target/release/slave.exe
+            target/release/virus.exe
 
   release:
     needs: [build-linux, build-windows]
@@ -60,6 +53,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            botnet-master-linux-x86_64.zip
-            botnet-slave-windows-x86_64.zip
+            master
+            slave.exe
+            virus.exe
           generate_release_notes: true
