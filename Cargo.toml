@@ -28,8 +28,6 @@ path = "src/virus.rs"
 [build-dependencies]
 embed-manifest = "1.5.1"
 
-[target.x86_64-pc-windows-gnu.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_System_Console"] }
-
 [target."cfg(windows)".dependencies]
 hide_console = "0.2.1"
+windows-sys = { version = "0.61.2", features = ["Win32_System_Console"] }
