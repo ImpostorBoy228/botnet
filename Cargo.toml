@@ -23,3 +23,6 @@ path = "src/slave.rs"
 [[bin]]
 name = "virus"
 path = "src/virus.rs"
+
+[build-dependencies]
+embed-manifest = "1.5.1"
