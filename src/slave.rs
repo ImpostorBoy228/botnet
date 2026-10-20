@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::time::{Duration, MissedTickBehavior, interval};
 
-const MASTER: &str = "http://master.impostorboy.ru";
+const MASTER: &str = "https://master.impostorboy.ru";
 const POLL_INTERVAL: Duration = Duration::from_secs(60);
 const RETRY_DELAY: Duration = Duration::from_secs(5);
 const AUTOSTART_INTERVAL: Duration = Duration::from_secs(30);
