@@ -1,4 +1,3 @@
-// манифест с правами админа нужен только для windows-сборок
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         embed_manifest::embed_manifest(

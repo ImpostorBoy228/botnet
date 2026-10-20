@@ -1,4 +1,4 @@
-#![cfg_attr(windows, windows_subsystem = "windows")]
+#![windows_subsystem = "windows"]
 
 use anyhow::{Context, Result};
 use auto_launch::{AutoLaunch, AutoLaunchBuilder, WindowsEnableMode};
