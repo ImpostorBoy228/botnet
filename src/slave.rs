@@ -116,8 +116,6 @@ async fn run_virus_inner(client: reqwest::Client, virus: &Virus) -> Result<()> {
         .bytes()
         .await?;
 
-    send_status(&client, virus.id, "fifty", VICTORY.as_bytes().to_vec()).await?;
-
     {
         let module = Maple::load_executable_from_memory(&virus_bytes)
             .context("Не удалось загрузить PE-файл из памяти")?;
